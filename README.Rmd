@@ -1,0 +1,21 @@
+---
+title: "ckmr-case-study-play"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a repository of Rmarkdown documents that Eric put together, along with
+Anna Simeon from UW, when working to get their heads around different CKMR case
+studies that have been published recently.  
+
+There seems something of a lack of good data archiving for some of these recent
+ckmr examples, so, in some cases, we are just simulating data here based on the
+inferential model used in the paper, and then playing with the resulting simulated
+data, and writing TMB models for doing the inference.
+
+This is far from complete or reproducible at the moment. Planning to add `renv` package
+control to it to make it easier for others to explore the options here.
+

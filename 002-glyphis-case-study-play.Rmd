@@ -1,0 +1,128 @@
+---
+title: "Simulation and Inference Play of Patterson et al.'s speartooth shark _Glyphis glyphis_ CKMR paper on bioRxiv"
+output: html_document
+bibliography: references.bib
+---
+
+\newcommand{\MHSP}{\mathrm{MHSP}}
+\newcommand{\PHSP}{\mathrm{PHSP}}
+\newcommand{\FSP}{\mathrm{FSP}}
+
+
+Here we explore the models used in @pattersonRapidEstimationCryptic2022.
+
+
+We note that they start with an exponential growth/decline model for the abundance of the
+separate sexes, and then they decide that they will assume constant population size.
+
+So, they set $\lambda$ to 0 and just model $N_0$ as the constant breeding abundance. Though
+I think they break that into males and females.
+
+They have annual adult survival for sex $s$ as $\phi_s$.
+
+They have an allowance for skip breeding.  They let $\psi$ be the fraction of adult
+females that spawn on a rigid two year cycle.   If $\psi = 0$ then the number of breeding
+females, $\tilde{N}$ is simply the number of females, $N$.  (The $F$ subscript for females having
+been dropped here).  If $\psi = 1$ then every female is on a rigid two year cycle. They
+make the assumption that rigid two-year spawners are randomly either odd or even year spawners.  Thus, with
+$\psi = 1$ the number of spawners in any years is expected to be $N/2$.
+
+The expected number of spawning females in any year, given $\psi$ can be calculated by noting that
+$(1-\psi)N$ females will be spawners, because they are "every-year" spawners, and $\psi N/2$ are expected
+to be two-year spawners that are spawning in this year.  Hence:
+$$
+\tilde{N} = (1-\psi)N + \psi N/2 = \frac{(2 - 2\psi)N + \psi N}{2} = \frac{N(2-\psi)}{2}.
+$$
+
+OK, so when they talk about the "effective" number of female spawners, they are talking about
+the "expected" number of female spawners.
+
+Now, if an HSP is was born an even number of years apart, then its parent could have been
+either an "every-year" spawner, or a two-year spawner.  So the probability of a MHSP is
+$$
+P(\MHSP|c_1,c_2) = \frac{\phi^{|c_1-c_2|}}{\tilde{N}}~~,~~\mbox{when}~|c_1-c_2|~\mbox{is even}.
+$$
+On the other hand, if the age difference between the members of the pair is odd, then we know that
+the mother must have been an "every-year" spawner, which happens with probability $(1-\psi)$, and
+therefore:
+$$
+P(\MHSP|c_1,c_2) = \frac{(1-\psi)\phi^{|c_1-c_2|}}{\tilde{N}}~~,~~\mbox{when}~|c_1-c_2|~\mbox{is odd}.
+$$
+
+## Within Cohort Comparisons
+
+A pair will be full siblings, if
+
+1. They were born in the same cohort, $c_i$
+2. They had the same mother (probability $1/\tilde{N}_{f,c_1}$)
+3. They had the same father (probability $(1-\theta)$).  So, note that
+$\theta$ is the "pairwise" probability of multiple paternity.  i.e., $\theta$ is the
+probability that a pair of offspring from a single female have different fathers.
+
+So, the probability in this case is:
+$$
+\frac{(1-\theta)}{\tilde{N}_{f,c_i}}
+$$
+However, they have an "inflation factor" $\nu$ for the fact that these are in the same cohort.
+When $\nu > 1$ it reflects the fact that members of individual litters tend to all survive or die in a
+correlated fashion.  So we have:
+$$
+P(k_{ij} = \FSP, \mathbf{z}, \eta) = \frac{\nu(1-\theta)}{\tilde{N}_{f,c_i}}
+$$
+
+For MHSP, the probability is just like for FSPs, but we have a different father for
+each member of the pair, hence $\theta$ instead of $(1-\theta)$, and also, 
+the HSP must be detected.  Which means it is not a false negative.  They use
+$\pi_\eta^{hsp}$ to denote the probability that an HSP has a PLOD greater than
+$\eta$.  
+$$
+P(k_{ij} = \MHSP, \mathbf{z}, \eta) = \frac{\pi_\eta^{hsp}\nu\theta}{\tilde{N}_{f,c_i}}
+$$
+
+The paternal half sibling pairs are similar, except that we must ensure that
+the mothers were different.  So again, they need to properly define $\gamma$ as the
+probability that a randomly chosen pair of offspring from the same father
+have different mothers.  Also, they assume that the litter effect only applies to 
+litters of females, so the drop $\nu$ in this case.
+So, $\nu$ is not something that is dealing with variable survival from one year
+to the next, but rather entirely is accounting for correlated survival of individuals
+because they were born from the same mother, in the same cohort.
+$$
+P(k_{ij} = \PHSP|\mathbf{z}, \eta) = \frac{\pi_\eta^{hsp}\gamma}{\tilde{N}_{m,c_i}}
+$$
+
+## Cross-cohort comparisons
+
+These will only be half-siblings (we presume).  They let $\delta = c_i - c_j$, so that $c_i$
+is the cohort of the younger member of the pair.  And then:
+$$
+P(k_{ij} = \MHSP, \mathbf{z}, \eta) = \frac{\pi_\eta^{hsp}\phi^\delta}{\tilde{N}_{f,c_i}}
+$$
+
+And for paternal half sibs, we just have:
+$$
+P(k_{ij} = \PHSP, \mathbf{z}, \eta) = \frac{\pi_\eta^{hsp}\phi^\delta}{\tilde{N}_{m,c_i}}
+$$
+
+## Putting it all together into a likelihood
+
+The authors do something strange here.  They describe the use of a Bernoulli likelihood instead
+of a polychotomous likelihood.  They give the likelihood as (with some fixes so they aren't
+double counting pairs):
+$$
+\mathcal{L}(N_0, \lambda, \phi|\mathbf{Z}) = \sum_{i<j}\log (p_{ij}^{kin})
+$$
+Where:
+$$
+p_{ij}^{kin} = \begin{cases} 
+P(k_{ij} = \MHSP, \mathbf{z}, \eta) + P(k_{ij} = \PHSP, \mathbf{z}, \eta) + P(k_{ij} = \FSP, \mathbf{z}, \eta)~~\mathrm{if}~~\kappa \in \mathcal{K} \\
+1 - [P(k_{ij} = \MHSP, \mathbf{z}, \eta) + P(k_{ij} = \PHSP, \mathbf{z}, \eta) + P(k_{ij} = \FSP, \mathbf{z}, \eta)]~~\mathrm{if}~~\kappa \notin \mathcal{K}
+\end{cases}
+$$
+The weird thing about this is that you will get the same likelihood if you have the same
+number of pairs in $\mathcal{K}$, even if in one case they are all FSPs and in the other
+case, they are all MHSP.  This likelihood does not depend upon the sufficient statistic.
+
+
+
+## References

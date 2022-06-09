@@ -1,0 +1,168 @@
+---
+title: "Exploring Hillary et al. and the estimate of White Shark Abundance, etc."
+output: html_notebook
+bibliography: references.bib
+---
+
+Here we explore the models used in @hillary2018genetic.  Looking through the paper, I didn't
+find any direct mention of a public repository of data that was used in the paper,
+nor any repository of code for their analyses. So, we are just going to simulate
+some data here from their model (first just from their inference model, and maybe later
+we will do so with a simple individual-based-model) so that we have something to work with.
+One nice thing about simulating from their simulation model is that doing so offers a good
+way to gain a better understanding their model.
+
+## Their inferential model
+
+They start with a demographic model of exponential growth:
+$$
+N_t^A = N_\mathrm{init}e^{\lambda t}
+$$
+where $N_t^A$ is the number of adults at time $t$ and $N_\mathrm{init}$ is the initial number
+of adults (at time $t = 0$). $\lambda$ is an exponential growth rate.  
+
+Here, we define a function to calculate $N_t^A$:
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+N_adults <- function(N0, t, lambda) {
+  N0 * exp(lambda * t)
+}
+```
+
+Let's see what that would look like over 60 years, starting from a few differenty $N_\mathrm{init}$
+values and growing/shrinking at a range of values.
+```{r}
+A_traj <- expand_grid(
+  Ninit = c(600, 800, 1000, 1200, 1500, 2000), 
+  lambda = seq(-0.03, 0.03, by = 0.01)
+)%>%
+  mutate(
+    num_adults = map2(Ninit, lambda, function(x, y) N_adults(x, 0:60, y)),
+  ) %>%
+  unnest(num_adults) %>%
+  group_by(Ninit, lambda) %>%
+  mutate(year = 0:60)
+
+ggplot(A_traj, aes(x = year, y = num_adults, colour = factor(lambda))) +
+  geom_line() +
+  facet_wrap(~ Ninit)
+
+```
+Now that we have all those different trajectories, let's nest them
+into separate tibbles so we can operate easily on one at a time with
+different functions.
+
+```{r}
+A_traj_nest <- A_traj %>%
+  group_by(Ninit, lambda) %>%
+  nest()
+```
+
+And now we are going to simulate some half-sib pair data from each of these
+models, pretending that we have sampled 10 sharks between ages 3 and 8 each
+year from years 20 to 40.  We will assume the sample is of the same size 
+and ages for each scenario.
+
+So, first, we sample individuals from each different scenario.
+```{r}
+set.seed(5)
+samples <- tibble(
+  samp_year = rep(20:40, each=10)
+) %>%
+  mutate(
+    age = sample(3:8, size = n(), replace = TRUE, prob = c(8:3)),
+    born_year = samp_year - age
+  )
+```
+
+So, that is 210 samples.  Now, let's join those on with the population trajectories, and
+then nest them all into separate tibbles of samples and the population sizes during the
+year when they were born
+```{r}
+multi_samples <- samples %>%
+  left_join(A_traj, by = c("born_year" = "year")) %>%
+  group_by(Ninit, lambda) %>%
+  nest() %>%
+  rename(samples = data)
+```
+
+Now, we want to compute the probability that each of the possible pairs of those samples
+are HSPs from the number of adults when the younger member of the pair was born.
+Let's first form all the pairs of them:
+```{r}
+# make a function to create the pairs
+make_pairs <- function(samples) {
+  n <- nrow(samples)
+  s1 <- samples[rep(1:n, each = n),]
+  s2 <- samples[rep(1:n, times = n),]
+  names(s2) <- paste0(names(s2), ".old")
+  
+  pairs <- bind_cols(s1, s2) %>%
+    filter(born_year.old < born_year)
+  pairs
+}
+
+# then apply that:
+multi_pairs <- multi_samples %>%
+  mutate(pairs = map(samples, make_pairs))
+```
+
+Now, for each of these pairs we want to compute the half-sibling probability.
+Doing so requires the adult survival probability.  Tell you what---let's
+compute these for a range of different adult survival probabilities.
+
+First, we need to write a function for the HSP probabilities.
+```{r}
+HSP_probs <- function(num_adults, phiA, born_year, born_year.old) {
+  (4/num_adults) * (phiA ^ (born_year - born_year.old))
+} 
+```
+Then we can go ahead and apply those:
+```{r}
+multi_pairs2 <- expand_grid(phiA = c(0.85, 0.90, 0.94, 0.96), multi_pairs) %>%
+  mutate(pairs = map2(pairs, phiA, function(x, y) x %>% mutate(HSP_prob = HSP_probs(num_adults, y, born_year, born_year.old))))
+  
+```
+
+OK, that is a big mongo-sized tibble of lots of HSP probs under different scenarios.
+Let's plot a few cases. Try this:
+```{r, fig.height=4, fig.width=4, out.width='100%'}
+multi_pairs2 %>% filter(
+  near(phiA, 0.94) | near(phiA, 0.9) | near(phiA, 0.85), 
+  Ninit == 800, 
+  near(lambda, 0.01) | near(lambda, 0) | near(lambda, -0.01)
+) %>% unnest(pairs) %>%
+  ggplot(
+  ., 
+  aes(
+    x = born_year, 
+    y = HSP_prob, 
+    fill = factor(born_year - born_year.old), 
+  )
+) +
+  geom_point(shape = 21) +
+  facet_grid(lambda ~ phiA) +
+  theme(legend.position = "none")
+```
+
+Yep, that totally makes sense.
+
+So, now we want to basically use the HSP prob from each condition and use it to simulate
+whether each pair is an HSP or not, and once we have done that we will count up how many
+HSPs (and not) there are from each scenario.
+
+```{r}
+mp3 <- multi_pairs2 %>%
+  mutate(pair_counts = map(
+    pairs, 
+    function(x) {
+      x %>% 
+        mutate(
+          isHSP = rbernoulli(n(), p = HSP_prob),
+          born_year_diff = born_year - born_year.old
+        ) %>%
+        count(samp_year, born_year_diff, HSP_prob, isHSP)
+    }))
+```
+# Citations
+

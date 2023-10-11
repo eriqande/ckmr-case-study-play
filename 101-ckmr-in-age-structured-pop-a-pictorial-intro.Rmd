@@ -1,0 +1,630 @@
+---
+title: "CKMR in Age-Structured Populations: a Pictorial Introduction"
+output: pdf_document
+date: "2023-09-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+\newcommand{\Fec}{\mathrm{Fec}}
+\newcommand{\bE}{\boldsymbol{E}}
+\newcommand{\bN}{\boldsymbol{N}}
+\newcommand{\bS}{\boldsymbol{S}}
+
+
+Had a meeting with Will Patterson, David Chagaris, Liam Kehoe, Chris Hollenbeck, and David
+Portnoy recently.  We were talking about a project we have to assess sensitivity of
+CKMR estimates to uncertainty in life-history parameters that are externally
+estimated and then used in the CKMR framework.
+
+We have, up till now, been primarily focused on thinking about individual-based
+modeling approaches to simulate some scenarios and look at the effects of that
+uncertainty.  During the call today I started thinking about other ways of doing
+it, like coding up the likelihood and then investigating the Hessian.  We will
+leave that till later, but as a first stop along the way, I figured that it would
+not hurt to just start thinking generally about the form of the likelihood
+in these cases, which might prove a useful prelude to implementing a function in
+TMB to calculate the likelihood for fairly general CKMR situations in age-structured
+populations.  I think it will also help us in thinking about input uncertainty.
+
+My goal here is a fairly pictorial account of the key features that one needs
+to know in order to calculate CKMR kin probabilities.  I just started thinking
+about representing the quantities associated with these probabilities in the
+way that I do, below, and, to my brain, these representations make a lot
+more sense than some of the other representations I have seen (like lexi plots).
+
+# CKMR kin probabilities
+
+We will consider a situation with organisms having a maximum age of $a_\mathrm{max}$ and we
+will consider times from 1 to $T$.  The most refined target of inference
+using CKMR in this scenario would be
+$N_{s,t,a}$, the number of individuals of sex $s$ at time $t$ of age $a$.  
+
+Let's take a concrete example with $T=15$ and $A=a_\mathrm{max}=8$.  And let's also, for the
+sake of illustration, make up some fairly simple life-history parameters, given in the following
+table.  $S_a$ (written `S_a` in the table) is the probability of
+surviving from age $a-1$ to $a$, and, for simplicity
+here, it is assumed
+to be the same for males and females.  $M_m$ (`M_m`) is the fraction of males of each age that
+are mature, while $M_f$ (`M_f`) is the fraction of females that are mature.  Meanwhile,
+`Fec_f` is the fecundity of females, and `Fec_m` is the expected reproductive
+potential of each male of a given age. Note that these last two are not given on
+a relative scale, but they could have been.
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(latex2exp)
+vitals <- tibble(
+  a = 1:9,
+  S_a = c(0.3, 0.7, 0.8, 0.9, 0.9, 0.95, 0.95, 0.9, 0.0),
+  M_f = c(0.0, 0.0, 0.5, 0.8, rep(1.0, 4), 0.0),
+  M_m = c(0.2, 0.7, rep(1.0, 6), 0.0),
+  Fec_f = c(0, 0, 1000, 2000, 3000*(2:5), 0.0),
+  Fec_m = c(seq(100, 300, length.out = 8), 0.0)
+)
+knitr::kable(vitals[1:8,], digits = 2)
+```
+
+Then, if that system had a mild amount of variation in the number of
+age-0 offspring produced, as well as a bit of variation in the realized
+survival rates each year for each age group, we might be able to represent
+the number of individuals of sex $s$ of each age $a$ in each year
+$t$, pictorially, with something like this:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+
+
+#' simple function to iterate some age structured survival
+#' that assumes a random input to age-0 each year
+#' @param S the vector of survival probs for surviving
+#' to age 1,...,length(S). The last element will be treated
+#' as 0. 
+#' @param T the number of years
+iterate_S <- function(S, T) {
+  A <- length(S) - 1
+  St <- S[1:A]
+  N0 <- runif(T, min = 8000, max = 10000)
+  
+  ret <- matrix(NA, nrow = A, ncol = T)
+  ret[,1] <- N0[1] * normo(rmultinom(n = 1, size = 400, prob = cumprod(St))[,1])
+  for(i in 2:T) {
+    ss <- St + rnorm(n = A, sd = St / 30)
+    ret[1,i] <- N0[i] * ss[1]
+    ret[-1, i] <- ret[-nrow(ret), i - 1] * ss[-1]
+  }
+  ret
+}
+
+
+set.seed(5)
+T <- 15
+A <- 8
+normo <- function(x) {x / sum(x)}
+Ns <- expand_grid(t = 1:T, a = 1:A) %>%
+  mutate(N = sprintf("$N_{s,%d,%d}$", t, a)) %>%
+  mutate(
+    Nt = as.vector(iterate_S(vitals$S_a, T))
+  )
+  
+
+as <- unique(c(Ns$a - 0.5, Ns$a + 0.5))
+ts <- unique(c(Ns$t - 0.5, Ns$t + 0.5))
+ggplot(Ns, aes(x = t, y = a)) +
+  geom_tile(aes(fill = Nt)) +
+  geom_text(
+    aes(label = TeX(N, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6) +
+  theme_void() +
+  coord_cartesian(expand = FALSE)
+```
+
+It is worth noting that the recruitment variability (number of 0-year-olds that make it
+to be 1-year-olds) is evident in the streaks of lighter and darker colors moving
+diagonally to the right up the plot.  
+
+Those $N$'s are, of course, unknown.  We will be trying to estimate something like those $N$'s, but
+we won't estimate each different $N_{s,t,a}$.  Rather we will have a model (perhaps like a sort of
+Leslie Matrix, or maybe something parameterized in combination with an exterally estimated
+age composition---or maybe a combination of both) by which we can estimate all
+those $N_{s,t,a}$, based on a much smaller number of parameters.  
+
+When it comes time to compute kin-probabilities in this model, some related quantities
+that we can use are the year-specific age compositions.  We use $R_{s,t,a}$
+to denote the relative abundance of $a$-year-olds of sex $s$ in year $t$.  Most simply
+we can think of these as proportions:
+$$
+R_{s,t,a} = \frac{N_{s,t,a}}{\sum_{a'} N_{s,t,a'}}
+$$
+
+Based on the simulated $N$ values above, here is what those $R$'s look like:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+Rs <- Ns %>%
+  group_by(t) %>%
+  mutate(
+    R = Nt / sum(Nt),
+    Rlab = sprintf("$R_{s,%d,%d}$", t, a)
+  )
+
+ggplot(Rs, aes(x = t, y = a)) +
+  geom_tile(aes(fill = R)) +
+  geom_text(
+    aes(label = TeX(Rlab, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6) +
+  theme_void() +
+  coord_cartesian(expand = FALSE)
+```
+
+The reason that these $R$ values are relevant for calculating the kin
+probabilities is that every direct kin-probability calculation that you will do is going
+to be conditioned on the birth years of the first-born and the second-born individuals
+in the pair.  (Sometimes there might be uncertainty in those years, but to deal with that
+we will be taking a sum over the unobserved birth years, so you will still be
+conditioning on those birth years!)
+
+Conditioning upon a certain birth year, the
+chance that an individual was born to an individual of a given age depends on the
+_expected relative reproductive output_, or ERRO, of all the individuals of that age, and that
+ERRO can be equivalently computed using the $R$'s or the $N$'s.  It can be useful to formulate
+the ERRO in terms of the $R$'s rather than the $N$'s because you might have age
+composition estimates from some other sources and those could be used to inform
+the $R$'s in the model, etc.
+
+We will use $E_{s,t,a}$ to denote the ERRO of individuals of sex $s$ and age $a$
+at time $t$.  Note that these quantities are fractions of expected reproductive
+output relative to all the reproducing individuals of sex $s$ at time $t$.  They
+are calculated as:
+$$
+E_{s,t,a} = \frac{R_{s,t,a} M_{s,a} \Fec_{s,a}}{\sum_{a'} R_{s,t,a'} M_{s,a'} \Fec_{s,a'}},
+$$
+where $M_{s,a}$ is the probability that an $a$-year-old of sex $s$ is mature and
+$\Fec_{s,a}$ is the expected (relative, if desired) reproductive output of a
+mature $a$-year-old of sex $s$.
+For females this is often taken to be the fecundity.
+
+So, here is what the ERRO looks like for females in our simple example:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+Es <- Rs %>%
+  left_join(vitals, by = "a") %>%
+  mutate(
+    Em_str = sprintf("$E_{m,%d,%d}$", t, a),
+    Ef_str = sprintf("$E_{f,%d,%d}$", t, a),
+  ) %>%
+  group_by(t) %>%
+  mutate(
+    Emt = R * M_m * Fec_m / sum(R * M_m * Fec_m),
+    Eft = R * M_f * Fec_f / sum(R * M_f * Fec_f),
+    Emt = ifelse(near(Emt, 0), NA, Emt),
+    Eft = ifelse(near(Eft, 0), NA, Eft)
+  ) %>%
+  ungroup()
+
+# let us make a note of the maximum and minimum ERROs here, because
+# we will want to fill color scale to remain constant acccording to those
+max_erro <- max(c(Es$Emt, Es$Eft), na.rm = TRUE)
+min_erro <- min(c(Es$Emt, Es$Eft), na.rm = TRUE)
+
+ggplot(Es, aes(x = t, y = a)) +
+  geom_tile(aes(fill = Eft)) +
+  geom_text(
+    aes(label = TeX(Ef_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE)
+```
+
+
+and here it is for males:
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+ggplot(Es, aes(x = t, y = a)) +
+  geom_tile(aes(fill = Emt)) +
+  geom_text(
+    aes(label = TeX(Em_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE)
+```
+
+White cells indicate no reproductive output.  Those are the ages where females
+are not yet reproductively mature.  Some fraction of the males mature at age
+1 and 2, so there are no white cell amongst the males.
+
+
+# Calculating probabilities that pairs are kin
+
+Now that we have these basic pictures set, we can start using them to understand
+the process whereby we calculate the probability that two samples---call them
+$K_1$ and $K_2$---that were
+born in years $b_1$ and $b_2$, respectively, with $b_1 < b_2$,
+are related to one another.  
+
+## Half-sibling probabilities
+
+We will start with
+the case of half-sibling relationships.  To make an initial picture of this
+we will take a concrete example, with
+the first-born ($K_1$) being born in year $b_1 = 4$ and the second born ($K_2$)
+being born in year $b_2=6$,  and we will
+think about the probability that the pair are maternal half-sibs.  
+
+One important thing to note is this: we are conditioning on
+$K_1$ and $K_2$ having survived until whatever
+time they were sampled, so we don't have to include any terms for the samples
+themselves surviving any number of years.
+
+When we calculate these sorts of probabilities we are always conditioning
+upon the birth years of the pair, which means that we focus on a subset of the
+adult population that the offspring could have come from.  In this case, that
+subset is, "all pairs of samples in which the first-born was born at time
+4 and the second-born was born at time 6."  Thus, we can represent the
+females in the population that could have given rise to this subset of
+pairs like this:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+Es %>%
+  mutate(Eft = ifelse(t %in% c(4, 6), Eft, NA)) %>%
+ggplot(aes(x = t, y = a)) +
+  geom_tile(aes(fill = Eft)) +
+  geom_text(
+    aes(label = TeX(Ef_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE)
+```
+
+The colored cells above are showing us all the components of the female population that
+could be mothers of a pair
+in which the first-born was born in year 4 (the first column of colored cells) and the
+second-born was born in year 6 (the second column of colored cells).  Remember,
+that represents our "universe"---with probability one, a pair with $b_1=4$ and $b_2=6$
+came from mothers in those colored segments of the population.
+
+In order to calculate the probability that a pair consists of maternal half siblings we start
+carving out fractions of that probability of one by invoking all the events that must occur
+in order for the pair to be maternal half-siblings. Those events can be
+summarized like this:
+
+1. The mother that produced $K_2$ at time $b_2$ must be $b_2 - b_1$ years older
+than the mother that produced $K_1$.  (Clearly, if $K_2$'s mother is not $b_2-b_1$
+years older than $K_1$'s mother, then there is no chance that those two mothers
+are the same individual).
+2. The mother that produced $K_1$ must have been present at the time of $K_2$'s
+birth.  For this to happen, $K_1$'s mother must have survived the intervening years.
+3. Given the first two events happened, finally, it must be the case that
+the mother of $K_1$ is also the mother of $K_2$.  Since all of the
+$N_{f,t,a}$ females are assumed to have the same ERRO, the probability
+that the mother of $K_1$ is the mother of $K_2$ is just the expected fraction
+of all the $N_{f,t,a}$ mothers in a cell that are from a single one of those
+mothers, and that is simply $1/N_{f,t,a}$.  
+
+In order to handle all these probabilities elegantly and come up with
+a single number that is the maternal half-sibling probability, we typically
+have to sum these sorts of probabilities over all the possible ages, $a^*$,
+of the mother of the first-born.  Therefore, we are going to present graphical
+images for each of the three above events/probabilities for the particular case
+in which we are conditioning upon the age of the mother of $K_1$ being $a^* = 5$.
+
+Thus, we can depict event 1, with $a^* = 5$ like this:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+Es %>%
+  mutate(Eft = ifelse((t == 4 & a == 5) | (t == 6 & a == 7), Eft, NA)) %>%
+ggplot(aes(x = t, y = a)) +
+  geom_tile(aes(fill = Eft)) +
+  geom_text(
+    aes(label = TeX(Ef_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE)
+```
+
+That is merely showing the event in which first-born from time $b_1 = 4$ came from a mother of age $a^* = 5$
+and the second born from time $b_2 = 6$ came from a mother of age 7 at time $b_2$. The important part to
+see here is that the probability of finding a pair with birth years $b_1$ and $b_2$ that came from
+mothers of those ages is, simply:
+$$
+E_{f,4,5}E_{f,6,7}.
+$$
+
+The second event that has to happen is that the mother of the first-born must survive
+at least until the time of the second-born's birth.  We are going to depict that with
+a line, whose width denotes the probability that this mother has survived through these
+different time steps:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+# first, we are going to expand our tibble with the things that
+# we need for drawing arrows from all the cells of different
+# ages at time tt, to all the cells they can reach in db years
+#' @param Es the current tibble of life table stuff
+#' @param tt that starting time of the arrows
+#' @param db the difference in birth years
+#' @param fr age of first reproduction (i.e. 3 for females, 1 for males)
+#' @param astar if not NA, then filter out the arrow data except for
+#' the ones going up from astar.
+cum_surv_probs <- function(Es, tt = 4, db = 2, fr = 3, astar = NA) {
+  sp <- distinct(Es, a, S_a) %>% pull(S_a)  # the survival probs
+  ma <- max(Es$a)  # max age
+  cp <- function(t, a) { # this function computes the cumulative prob of surviving
+                         # to age a by time t, given that you were alive at time tt
+    ret <- NA
+    if(t >= tt && t <= tt + db && a - (t - tt) >= fr && a + db - (t - tt) <= ma) {
+      astart = a - (t - tt);
+      if(astart == a) {
+        ret <- 1.0
+      } else {
+        ret <- prod(sp[(astart + 1):a])
+      }
+    }
+    ret 
+  }
+  Es %>%
+    mutate(
+      cp_S = map2_dbl(.x = t, .y = a, .f = cp)  # cp_S is the cumulative product of survival
+    ) %>%
+    mutate(
+      cp_S = case_when(
+        is.na(astar) | a - (t - tt) == astar ~ cp_S,
+        TRUE ~ NA_real_
+      ),
+      arrow_start = t == tt,
+      arrow_end = t == tt + db,
+      ae_na = ifelse(arrow_end, 1, NA),
+      ae_na = ifelse(a < fr + db, NA, ae_na)  # make sure they don't appear in the cells that don't produce any
+    )
+}
+
+Esastar <- cum_surv_probs(Es, tt = 4, db = 2, fr = 3, astar = 5)
+
+
+first_surv_seg_fig <- Esastar %>%
+  mutate(
+    Eft = ifelse((t == 4 & a == 5) | (t == 6 & a == 7), Eft, NA),
+    ae_na = ifelse((t == 4 & a == 5) | (t == 6 & a == 7), ae_na, NA)
+  ) %>%
+ggplot(aes(x = t, y = a)) +
+  geom_tile(aes(fill = Eft)) +
+  geom_text(
+    aes(label = TeX(Ef_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE) +
+  scale_linewidth_continuous(limits = c(0, 1), range = c(0, 3)) +
+  guides(linewidth = "none") +
+  geom_segment(
+    mapping = aes(
+      x = t - 0.5 * !arrow_start,
+      xend = t + 0.5 * !arrow_end,
+      y = a - 0.5 * !arrow_start,
+      yend = a + 0.5 * !arrow_end,
+      linewidth = cp_S
+    ),
+    colour = "gray40",
+    alpha = 0.5
+  )
+
+first_surv_seg_fig
+```
+
+It is a little hard to see it, but that line gets skinnier as it moves into new
+cells going up and to the right.  The width in the cell with $K_1$'s mother
+($t = 4$, $a = 5$) denotes a probability of 1.0 (she existed at that time) and in
+every time increment going forward, the linewidth represents the cumulative
+probability of surviving to that cell, on a linear scale.  In other words, the
+probability of surviving to the cell
+at $t=5$ and $a=6$ is $S_6 = 0.95$,
+and the probability of surviving all the way to age 7 is $S_6 * S_7 = 0.95 * 0.95 = 0.9025$.
+The line widths reflect those probabilities.
+
+
+
+Just for fun, because the changes in line width will be easier to see there,
+let's make a picture for male parents of a pair with $b_1 = 5$ and
+$b_2 = 11$.
+The two possible ages for a father of the first born that then survived
+for $11 - 5 = 6$ more years are
+then 1 and 2, and we get this:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+Esa_m <- cum_surv_probs(Es, tt = 5, db = 6, fr = 1)
+
+Esa_mstar <- Esa_m %>%
+  mutate(
+    Emt = ifelse((t == 5 & a <= 2) | (t == 11 & a %in% c(7, 8)), Emt, NA),
+    ae_na = ifelse((t == 5 & a <= 2) | (t == 11 & a %in% c(7, 8)), ae_na, NA)
+)
+
+ggplot(Esa_mstar, aes(x = t, y = a)) +
+  geom_tile(aes(fill = Emt)) +
+  geom_text(
+    aes(label = TeX(Em_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE) +
+  scale_linewidth_continuous(limits = c(0, 1), range = c(0, 3)) +
+  guides(linewidth = "none") +
+  geom_segment(
+    mapping = aes(
+      x = t - 0.5 * !arrow_start,
+      xend = t + 0.5 * !arrow_end,
+      y = a - 0.5 * !arrow_start,
+      yend = a + 0.5 * !arrow_end,
+      linewidth = cp_S
+    ),
+    colour = "gray40",
+    alpha = 0.5
+  )
+
+```
+
+Yes, that is nice to look at. Enough years are passing so that the differences
+in probability of survival from the beginning to the end are more evident. Also,
+the lower line is much skinnier at the end than the upper line because survival
+from age 1 to age 7 is lower than it is from age 2 to 8.  
+
+Anyways, let us return to our simple example with $a^* = 5$.  We are almost
+there.  Up to this point, we have depicted events 1 and 2, and they have a
+joint probability of:
+$$
+E_{f,4,5}E_{f,6,7} S_6S_7.
+$$
+The last event that must occur is for the mother of $K_2$ to be the same individual
+as the mother of $K_1$.  Because each of the mothers of age 7 at time 6 has the same
+ERRO, they are each pumping out, on average, the same number of offspring, and the
+probability that $K_2$'s mother is a specific one of those females ($K_1$'s mother,
+to be exact!) is just proportional to the average number of offspring being pumped out by any
+single individual, as a fraction of all the offspring getting produced by females
+of age 7 at time 6.  Since there are $N_{f,6,7}$ females pumping out offspring, the
+probability of sampling an offspring from a specific female is simply $1/N_{f,6,7}$.
+We will represent this with a small circle which symbolically (not in terms of
+total area!) represents the subset of offspring that came from
+the mother of $K_1$.  Hence our picture representing all three events (and their
+probabilities) now looks like:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+first_surv_seg_fig +
+  geom_point(aes(x = ae_na * t + 0.3, y = ae_na * a + 0.3), shape = 21, fill = NA, stroke = 0.2)
+```
+
+And the probability that represents is:
+$$
+\frac{E_{f,4,5}E_{f,6,7}}{N_{f,6,7}} S_6S_7.
+$$
+
+Of course, the calculation depicted above is just getting us the
+joint probability that $K_1$ and $K_2$ are maternal half-siblings
+_and_ their shared mother was of age $a^*=5$ in the year $b_1$.  To get
+the actual kin probability we have to sum those joint probabilities over all
+possible values of $a^*$.  The picture of all those probabilities looks like:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
+Es %>%
+  mutate(Eft = ifelse(t %in% c(4, 6), Eft, NA)) %>%
+  mutate(Eft = ifelse((t == 4 & a >= 7) | (t==6 & a < 5), NA, Eft)) %>%
+  cum_surv_probs(tt = 4, db = 2, fr = 3) %>%
+  ggplot(aes(x = t, y = a)) +
+  geom_tile(aes(fill = Eft)) +
+  geom_text(
+    aes(label = TeX(Ef_str, output = "character")),
+    parse = TRUE,
+    size = 7/.pt
+  ) +
+  geom_hline(yintercept = as) +
+  geom_vline(xintercept = ts) +
+  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
+  theme_void() +
+  coord_cartesian(expand = FALSE) +
+  scale_linewidth_continuous(limits = c(0, 1), range = c(0, 3)) +
+  guides(linewidth = "none") +
+  geom_segment(
+    mapping = aes(
+      x = t - 0.5 * !arrow_start,
+      xend = t + 0.5 * !arrow_end,
+      y = a - 0.5 * !arrow_start,
+      yend = a + 0.5 * !arrow_end,
+      linewidth = cp_S
+    ),
+    colour = "gray40",
+    alpha = 0.5
+  ) +
+  geom_point(aes(x = ae_na * t + 0.3, y = ae_na * a + 0.3), shape = 21, fill = NA, stroke = 0.2)
+```
+
+This picture and development should now make clear how we can write the maternal half-sibling kin probability,
+more generally. Let $a_\mathrm{min}$ be the first age at which a female has non-zero probability of producing offspring (3, in
+our example) and $a_\mathrm{max}$ be the maximum age at which a female will produce offspring (this is our maximum age
+of 8, in the example), and let $d = b_2 - b_1$, be the number of years between the births. Then, we can write:
+$$
+P(K_1~\mbox{and}~K_2~\mbox{are}~\mathrm{MHS}|b_1,b_2,\bE, \bN, \bS) = \sum_{a^*=a_\mathrm{min}}^{a_\mathrm{max} - d}\biggl[
+\frac{E_{f,b_1,a^*}E_{f,b_2,a^*+d}}{N_{f,b_2,a^*+d}}
+\prod_{a=a^*+1}^{a^* + d} S_a
+\biggr]
+$$
+
+Voila!
+
+
+## Parent-offspring probabilities
+
+Next we will derive these...
+
+## Other relationships
+
+Although half-sibling and parent-offspring pairs are the ones more readily
+used in a CKMR experiment, there are other relationships that are important---most
+often because these other relationships can be mistaken for the target relationship
+of half-sibling.  Being able to calculate the probabilities of their occurrence
+can help to account for their presence in the data set.  This should be fun.
+
+### Grandparent-grandchild
+
+Gotta do this still.
+
+### Half-thiatic (i.e.  half aunt-niece)
+
+Gotta do this one, also.  Note that this one ends up needing information
+about increase in kinship probabilities for individuals that are are born
+in the same year.  We will discuss that when we talk about full siblings.
+
+### Full siblings
+
+As promised, we will discuss overdispersed reproductive success in this context.
+Or perhaps first we will talk about within-cohort and cross-cohort half-sibling
+comparisons, and ways to parameterize the corresponding probabilities by a
+scaled variance in reproductive success parameter.  
+
+# Modeling the underlying quantities
+
+From the foregoing, we see that much of the art that goes into combining CKMR with
+additional fisheries data involves using those additional data to inform
+the variables that appear in the expresssions and pictures above.  Namely the:
+
+- year-specific age compositions (these inform the $R$'s and hence the $N$'s)
+- a recruitment index (these will inform the $R$'s and $N$'s, too)
+- estimates of fishing mortality (these will inform the $S$'s)
+- etc.
+
+This is the stuff that Claudia has done so beautifully.  

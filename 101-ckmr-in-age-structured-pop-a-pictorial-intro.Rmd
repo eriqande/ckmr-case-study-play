@@ -74,6 +74,7 @@ $t$, pictorially, with something like this:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
 
+source("R/plot-ckmr-pictorial.R")
 
 #' simple function to iterate some age structured survival
 #' that assumes a random input to age-0 each year
@@ -106,22 +107,9 @@ Ns <- expand_grid(t = 1:T, a = 1:A) %>%
   mutate(
     Nt = as.vector(iterate_S(vitals$S_a, T))
   )
-  
 
-as <- unique(c(Ns$a - 0.5, Ns$a + 0.5))
-ts <- unique(c(Ns$t - 0.5, Ns$t + 0.5))
-ggplot(Ns, aes(x = t, y = a)) +
-  geom_tile(aes(fill = Nt)) +
-  geom_text(
-    aes(label = TeX(N, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6) +
-  theme_void() +
-  coord_cartesian(expand = FALSE)
+plot_ckmr_pictorial(E = Ns, cell_fill_var = "Nt", cell_str_var = "N")
+  
 ```
 
 It is worth noting that the recruitment variability (number of 0-year-olds that make it
@@ -152,18 +140,8 @@ Rs <- Ns %>%
     Rlab = sprintf("$R_{s,%d,%d}$", t, a)
   )
 
-ggplot(Rs, aes(x = t, y = a)) +
-  geom_tile(aes(fill = R)) +
-  geom_text(
-    aes(label = TeX(Rlab, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6) +
-  theme_void() +
-  coord_cartesian(expand = FALSE)
+plot_ckmr_pictorial(E = Rs, cell_fill_var = "R", cell_str_var = "Rlab")
+
 ```
 
 The reason that these $R$ values are relevant for calculating the kin
@@ -216,18 +194,9 @@ Es <- Rs %>%
 max_erro <- max(c(Es$Emt, Es$Eft), na.rm = TRUE)
 min_erro <- min(c(Es$Emt, Es$Eft), na.rm = TRUE)
 
-ggplot(Es, aes(x = t, y = a)) +
-  geom_tile(aes(fill = Eft)) +
-  geom_text(
-    aes(label = TeX(Ef_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE)
+
+plot_ckmr_pictorial(E = Es, cell_fill_var = "Eft", cell_str_var = "Ef_str", min_fill = min_erro, max_fill = max_erro)
+
 ```
 
 
@@ -235,18 +204,9 @@ and here it is for males:
 
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-ggplot(Es, aes(x = t, y = a)) +
-  geom_tile(aes(fill = Emt)) +
-  geom_text(
-    aes(label = TeX(Em_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE)
+
+plot_ckmr_pictorial(E = Es, cell_fill_var = "Emt", cell_str_var = "Em_str", min_fill = min_erro, max_fill = max_erro)
+
 ```
 
 White cells indicate no reproductive output.  Those are the ages where females
@@ -285,20 +245,17 @@ females in the population that could have given rise to this subset of
 pairs like this:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-Es %>%
-  mutate(Eft = ifelse(t %in% c(4, 6), Eft, NA)) %>%
-ggplot(aes(x = t, y = a)) +
-  geom_tile(aes(fill = Eft)) +
-  geom_text(
-    aes(label = TeX(Ef_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE)
+
+hsp_mask1 <- expand_grid(t = c(4, 6), a = 1:8)
+plot_ckmr_pictorial(
+  E = Es, cell_fill_var = "Eft", 
+  cell_str_var = "Ef_str", 
+  min_fill = min_erro, 
+  max_fill = max_erro, 
+  cell_mask = hsp_mask1
+)
+
+
 ```
 
 The colored cells above are showing us all the components of the female population that
@@ -336,20 +293,18 @@ in which we are conditioning upon the age of the mother of $K_1$ being $a^* = 5$
 Thus, we can depict event 1, with $a^* = 5$ like this:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-Es %>%
-  mutate(Eft = ifelse((t == 4 & a == 5) | (t == 6 & a == 7), Eft, NA)) %>%
-ggplot(aes(x = t, y = a)) +
-  geom_tile(aes(fill = Eft)) +
-  geom_text(
-    aes(label = TeX(Ef_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE)
+
+hsp_mask2 <- tibble(t = c(4, 6), a = c(5, 7))
+plot_ckmr_pictorial(
+  E = Es, cell_fill_var = "Eft", 
+  cell_str_var = "Ef_str", 
+  min_fill = min_erro, 
+  max_fill = max_erro, 
+  cell_mask = hsp_mask2
+)
+
+
+
 ```
 
 That is merely showing the event in which first-born from time $b_1 = 4$ came from a mother of age $a^* = 5$
@@ -366,82 +321,19 @@ a line, whose width denotes the probability that this mother has survived throug
 different time steps:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-# first, we are going to expand our tibble with the things that
-# we need for drawing arrows from all the cells of different
-# ages at time tt, to all the cells they can reach in db years
-#' @param Es the current tibble of life table stuff
-#' @param tt that starting time of the arrows
-#' @param db the difference in birth years
-#' @param fr age of first reproduction (i.e. 3 for females, 1 for males)
-#' @param astar if not NA, then filter out the arrow data except for
-#' the ones going up from astar.
-cum_surv_probs <- function(Es, tt = 4, db = 2, fr = 3, astar = NA) {
-  sp <- distinct(Es, a, S_a) %>% pull(S_a)  # the survival probs
-  ma <- max(Es$a)  # max age
-  cp <- function(t, a) { # this function computes the cumulative prob of surviving
-                         # to age a by time t, given that you were alive at time tt
-    ret <- NA
-    if(t >= tt && t <= tt + db && a - (t - tt) >= fr && a + db - (t - tt) <= ma) {
-      astart = a - (t - tt);
-      if(astart == a) {
-        ret <- 1.0
-      } else {
-        ret <- prod(sp[(astart + 1):a])
-      }
-    }
-    ret 
-  }
-  Es %>%
-    mutate(
-      cp_S = map2_dbl(.x = t, .y = a, .f = cp)  # cp_S is the cumulative product of survival
-    ) %>%
-    mutate(
-      cp_S = case_when(
-        is.na(astar) | a - (t - tt) == astar ~ cp_S,
-        TRUE ~ NA_real_
-      ),
-      arrow_start = t == tt,
-      arrow_end = t == tt + db,
-      ae_na = ifelse(arrow_end, 1, NA),
-      ae_na = ifelse(a < fr + db, NA, ae_na)  # make sure they don't appear in the cells that don't produce any
-    )
-}
-
-Esastar <- cum_surv_probs(Es, tt = 4, db = 2, fr = 3, astar = 5)
 
 
-first_surv_seg_fig <- Esastar %>%
-  mutate(
-    Eft = ifelse((t == 4 & a == 5) | (t == 6 & a == 7), Eft, NA),
-    ae_na = ifelse((t == 4 & a == 5) | (t == 6 & a == 7), ae_na, NA)
-  ) %>%
-ggplot(aes(x = t, y = a)) +
-  geom_tile(aes(fill = Eft)) +
-  geom_text(
-    aes(label = TeX(Ef_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE) +
-  scale_linewidth_continuous(limits = c(0, 1), range = c(0, 3)) +
-  guides(linewidth = "none") +
-  geom_segment(
-    mapping = aes(
-      x = t - 0.5 * !arrow_start,
-      xend = t + 0.5 * !arrow_end,
-      y = a - 0.5 * !arrow_start,
-      yend = a + 0.5 * !arrow_end,
-      linewidth = cp_S
-    ),
-    colour = "gray40",
-    alpha = 0.5
-  )
+plot_ckmr_pictorial(
+  E = Es, cell_fill_var = "Eft", 
+  cell_str_var = "Ef_str", 
+  min_fill = min_erro, 
+  max_fill = max_erro, 
+  cell_mask = hsp_mask2, 
+  survival_endpoints = tibble(t1 = 4, a1 = 5, t2 = 6, a2 = 7)
+)
 
-first_surv_seg_fig
+
+
 ```
 
 It is a little hard to see it, but that line gets skinnier as it moves into new
@@ -464,39 +356,25 @@ for $11 - 5 = 6$ more years are
 then 1 and 2, and we get this:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-Esa_m <- cum_surv_probs(Es, tt = 5, db = 6, fr = 1)
 
-Esa_mstar <- Esa_m %>%
-  mutate(
-    Emt = ifelse((t == 5 & a <= 2) | (t == 11 & a %in% c(7, 8)), Emt, NA),
-    ae_na = ifelse((t == 5 & a <= 2) | (t == 11 & a %in% c(7, 8)), ae_na, NA)
+cm3 <- tibble(t = c(5, 5), a = c(1, 2)) %>%
+  bind_rows(tibble(t = c(11, 11),  a = c(7, 8)))
+segs <- tibble(
+  t1 = c(5, 5), a1 = c(1, 2)
+) %>%
+  mutate(t2 = t1 + 6, a2 = a1 + 6)
+
+plot_ckmr_pictorial(
+  E = Es, 
+  cell_fill_var = "Emt", 
+  cell_str_var = "Em_str", 
+  min_fill = min_erro, 
+  max_fill = max_erro, 
+  cell_mask = cm3, 
+  survival_endpoints = segs
 )
 
-ggplot(Esa_mstar, aes(x = t, y = a)) +
-  geom_tile(aes(fill = Emt)) +
-  geom_text(
-    aes(label = TeX(Em_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE) +
-  scale_linewidth_continuous(limits = c(0, 1), range = c(0, 3)) +
-  guides(linewidth = "none") +
-  geom_segment(
-    mapping = aes(
-      x = t - 0.5 * !arrow_start,
-      xend = t + 0.5 * !arrow_end,
-      y = a - 0.5 * !arrow_start,
-      yend = a + 0.5 * !arrow_end,
-      linewidth = cp_S
-    ),
-    colour = "gray40",
-    alpha = 0.5
-  )
+
 
 ```
 
@@ -525,8 +403,17 @@ the mother of $K_1$.  Hence our picture representing all three events (and their
 probabilities) now looks like:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-first_surv_seg_fig +
-  geom_point(aes(x = ae_na * t + 0.3, y = ae_na * a + 0.3), shape = 21, fill = NA, stroke = 0.2)
+
+plot_ckmr_pictorial(
+  E = Es, cell_fill_var = "Eft", 
+  cell_str_var = "Ef_str", 
+  min_fill = min_erro, 
+  max_fill = max_erro, 
+  cell_mask = hsp_mask2, 
+  survival_endpoints = tibble(t1 = 4, a1 = 5, t2 = 6, a2 = 7),
+  circ_cells = tibble(t = 6, a = 7)
+)
+
 ```
 
 And the probability that represents is:
@@ -541,36 +428,26 @@ the actual kin probability we have to sum those joint probabilities over all
 possible values of $a^*$.  The picture of all those probabilities looks like:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=2.2}
-Es %>%
-  mutate(Eft = ifelse(t %in% c(4, 6), Eft, NA)) %>%
-  mutate(Eft = ifelse((t == 4 & a >= 7) | (t==6 & a < 5), NA, Eft)) %>%
-  cum_surv_probs(tt = 4, db = 2, fr = 3) %>%
-  ggplot(aes(x = t, y = a)) +
-  geom_tile(aes(fill = Eft)) +
-  geom_text(
-    aes(label = TeX(Ef_str, output = "character")),
-    parse = TRUE,
-    size = 7/.pt
-  ) +
-  geom_hline(yintercept = as) +
-  geom_vline(xintercept = ts) +
-  scale_fill_viridis_c(option = "H", alpha = 0.6, na.value = NA, limits = c(min_erro, max_erro)) +
-  theme_void() +
-  coord_cartesian(expand = FALSE) +
-  scale_linewidth_continuous(limits = c(0, 1), range = c(0, 3)) +
-  guides(linewidth = "none") +
-  geom_segment(
-    mapping = aes(
-      x = t - 0.5 * !arrow_start,
-      xend = t + 0.5 * !arrow_end,
-      y = a - 0.5 * !arrow_start,
-      yend = a + 0.5 * !arrow_end,
-      linewidth = cp_S
-    ),
-    colour = "gray40",
-    alpha = 0.5
-  ) +
-  geom_point(aes(x = ae_na * t + 0.3, y = ae_na * a + 0.3), shape = 21, fill = NA, stroke = 0.2)
+
+starts = tibble(t = rep(4, 4), a = 3:6)
+cm_hsp_full <- bind_rows(
+  starts,
+  starts %>% mutate(t = t + 2, a = a + 2)
+)
+spts <- starts %>%
+  rename(t1 = t, a1 = a) %>%
+  mutate(t2 = t1 + 2, a2 = a1 + 2)
+
+plot_ckmr_pictorial(
+  E = Es, cell_fill_var = "Eft", 
+  cell_str_var = "Ef_str", 
+  min_fill = min_erro, 
+  max_fill = max_erro, 
+  cell_mask = cm_hsp_full, 
+  survival_endpoints = spts,
+  circ_cells = spts %>% mutate(t = t2, a = a2) %>% select(t, a)
+)
+
 ```
 
 This picture and development should now make clear how we can write the maternal half-sibling kin probability,

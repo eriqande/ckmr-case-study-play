@@ -19,6 +19,7 @@
 \newcommand{\FS}{\mathrm{FS}}
 \newcommand{\Un}{\mathrm{Un}}
 \newcommand{\bT}{\mathbf{\Theta}}
+\newcommand{\bSig}{\mathbf{\Sigma}}
 \newcommand{\bM}{\bm{M}}
 \newcommand{\bH}{\bm{H}}
 \newcommand{\bY}{\bm{Y}}
@@ -196,13 +197,46 @@ data set, and then their values taken as fixed while computing the probability o
 and not that many related pairs amongst the sample, this is probably all fine and good.
 
 
+\subsection{Sampling Considerations}
+
+As CKMR matures to start playing a role in stock assessments, etc., we will
+find that the samples obtained for genetic analysis have been drawn from
+fisheries that might be selective for certain characteristics of the fish (age, length, girth, etc.).  In general, it seems to me that gear selectivity can be
+modeled in terms of its effect on the probability having certain covariates
+on the fish in your sample.  So, let's represent sampling vagaries and selectivity
+into our model by $\bSig$.  Then, since it affects the covariates that we expect
+to observe on the sampled fish, we get the DAG in Figure~\ref{fig:general_dag_1_bSig}.
+%%%%%%%%%%%%%
+\begin{figure}
+\begin{center}
+\includegraphics[width=0.6\textwidth]{images/general-dag-1-bSig.pdf}
+\end{center}
+\caption{A general DAG of the CKMR pseudo likelihood, in which we
+also make explicit sampling considerations, by noting that these sampling
+considerations affect the covariates observed on the samples. We have
+shaded the node on $\bSig$ beige to indicate that there is likely some
+information on this from other sources (i.e. a likelihood that involves
+some other stock assessment
+data, etc.)}
+\label{fig:general_dag_1_bSig}
+\end{figure}
+%%%%%%%%%%%%%%%%
+In general, I expect that we won't be trying to estimate $\bSig$ from the
+CKMR data, but that some information about it will be available from
+other sources.
+
+An interesting thing to note here is that if the covariates are observed
+without any error, then the sampling considerations (selectivity) don't 
+play any role, as the rest of the variables are conditionally independent of them.
+As we will see, however, that conditional independence breaks down
+with uncertainty in the covariates.
+
 \subsection{Uncertainty in Covariates}
 
 Much of the time, there will be uncertainty about the exact values of the individual covariates.  Figure~\ref{fig:covar-uncert}
 shows one way of representing that.  Now $\bz_i$ and $\bz_j$ are treated as latent variables, and there are some observed data,
 $\bz_i^*$ and $\bz_j^*$ that depend on $\bz_i$ and $\bz_j$.  Inference in this case involves summing over the unobserved
 values of $\bz_i$ and $\bz_j$.
-
 %%%%%%%%%%%%%
 \begin{figure}
 \begin{center}
@@ -212,6 +246,10 @@ values of $\bz_i$ and $\bz_j$.
 \label{fig:covar-uncert}
 \end{figure}
 %%%%%%%%%%%%%%%%
+This makes it clear that uncertainty in covariates that are affected
+by sampling means that the rest of the graph is no longer
+conditionally independent of the sampling considerations.
+Cool.  
 
 \section{A DAG Using the ``Observed Relationship,'' $R_{ij}^*$}
 

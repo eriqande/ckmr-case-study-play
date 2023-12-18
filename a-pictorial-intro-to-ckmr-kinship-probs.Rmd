@@ -1,7 +1,8 @@
 ---
 title: "CKMR in Age-Structured Populations: a Pictorial Introduction"
 output: pdf_document
-date: "2023-09-26"
+author: "Eric C. Anderson"
+date: "`r Sys.Date()`"
 ---
 
 ```{r setup, include=FALSE}
@@ -14,28 +15,26 @@ knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 \newcommand{\bS}{\boldsymbol{S}}
 
 
-Had a meeting with Will Patterson, David Chagaris, Liam Kehoe, Chris Hollenbeck, and David
-Portnoy recently.  We were talking about a project we have to assess sensitivity of
-CKMR estimates to uncertainty in life-history parameters that are externally
-estimated and then used in the CKMR framework.
 
-We have, up till now, been primarily focused on thinking about individual-based
-modeling approaches to simulate some scenarios and look at the effects of that
-uncertainty.  During the call today I started thinking about other ways of doing
-it, like coding up the likelihood and then investigating the Hessian.  We will
-leave that till later, but as a first stop along the way, I figured that it would
-not hurt to just start thinking generally about the form of the likelihood
-in these cases, which might prove a useful prelude to implementing a function in
-TMB to calculate the likelihood for fairly general CKMR situations in age-structured
-populations.  I think it will also help us in thinking about input uncertainty.
+When I am working on CKMR in age-structured populations it always seems
+that I end up having to re-derive a lot
+of the kinship probabilities, and I always wish that I had a nice tidy expression for
+kinship probabilities, like Paul had in his presentation at the TWS workshop.
+Or, I might be working on some sort of new weird case,
+in which case I actually really do have to derive the probabilities.  In both cases,
+I always wish that I had better picture in my head of the quantities involved.
 
-My goal here is a fairly pictorial account of the key features that one needs
-to know in order to calculate CKMR kin probabilities.  I just started thinking
-about representing the quantities associated with these probabilities in the
-way that I do, below, and, to my brain, these representations make a lot
-more sense than some of the other representations I have seen (like lexi plots).
+This document provides a derivation of some common (and eventually somewhat more obscure)
+kinship probabilities in a pictorial format.  I have found it helpful for me to have
+a picture to look at things, and it often makes it much easier for me to verify things
+like limits of summation, etc.
 
-# CKMR kin probabilities
+The code for making these little pictures, and such, is available in my R package
+'ckviz' available at [https://github.com/eriqande/ckviz](https://github.com/eriqande/ckviz).
+
+
+
+# Vital rates, age-specific abundance and ERRO
 
 We will consider a situation with organisms having a maximum age of $a_\mathrm{max}$ and we
 will consider times from 1 to $T$.  The most refined target of inference
@@ -165,6 +164,20 @@ the process whereby we calculate the probability that two samples---call them
 $K_1$ and $K_2$---that were
 born in years $b_1$ and $b_2$, respectively, with $b_1 < b_2$,
 are related to one another.  
+
+It is important to note here that we are usually going to know the birth years
+of the members of the pair because:
+
+1. We know when we sampled the individual.
+2. We know its age when we sampled it.
+
+Thus, it is really important to be able to accurately age the individuals in your
+CKMR sample.  Sometimes, of course, there might be uncertainy around the age of
+the individual.  In that case, one has to sum over the different possible ages of the
+members of a pair, weighting by their age probabilities.  That is merely an extra
+layer that sits above what we are doing here.  For each term in the sum over ages,
+there is a probability that is calculated given that the age of the individual is
+known, and those probabilities are what we are calculating here.
 
 ## Half-sibling probabilities
 
@@ -426,7 +439,13 @@ Gotta do this still.
 
 ### Half-thiatic (i.e.  half aunt-niece)
 
-Gotta do this one, also.  Note that this one ends up needing information
+Gotta do this one, also. Even though these are not target kin pairs, typically,
+it would be nice to know that prbability of their occurrence---especially since
+that would be a critical step to actually dealing with their presence in a probabilitic
+fashion, rather than just setting the false negative rate for half-siblings so high
+that you don't expect to see any half-thiatics in there.
+
+Note that this one ends up needing information
 about increase in kinship probabilities for individuals that are are born
 in the same year.  We will discuss that when we talk about full siblings.
 
@@ -450,90 +469,3 @@ the variables that appear in the expresssions and pictures above.  Namely the:
 
 This is the stuff that Claudia has done so beautifully.  
 
-
-
-# A progression of models
-
-
-For the simulation work, I am envisioning a progression of models that go like this:
-
-## Constant adult population size, two classes: juve and adult
-
-This is the simplest of the models.  It assumes a constant adult population
-size, and that juveniles can be sampled as distinct from adults.
-
-In this case, all PO pairs probs are computed using just a single, constant $N$, and the implicit assumption
-is that all adults have the same ERRO.  
-
-If adults as sampled non-lethally before the birth of a sampled offspring, then one
-has to take into account adult survival in the probabilities.  In this case that would be
-assumed to be constant for all adults, too.  
-
-That survival rate also applies to half sibling calculations.
-
-The parameters in the estimation model would be $N_A$, and, possibly (depending
-on data type) $S_A$, which is the probability that an adult survives from one year
-to the next.  
-
-## Two classes: juve and adult, with exponentially growing or declining population size
-
-This would be much like what we have above, except the kin probabilities now end up
-depending on the time of birth of the the individuals.
-
-For PO, the $N_A$ at the time of the birth of the offspring enters into the probability,
-while for HS, it is the $N_A$ at the time of birth of the second born.  You still might need
-to have an $S_A$ term in the model.  That need not, necessarily, reflect the exponential decline or
-increase of the population.
-
-For inference, this is the classic three-parameter model:  initial number of adults, $N_{A,0}$;
-exponential growth or decline rate, $\lambda$, and $S_A$.   Note that the adult population size for each
-time $t>0$ is $N_{A,t} = N_{A,0}e^{\lambda t}$.  Time 0 is typically taken to be the time of the
-earliest born individual in the sample.  
-
-The key feature of this particular model is still that the ERRO of all adults
-is assumed to be the same.  Thus adults are exchangeable with respect to ERRO.  
-
-The big jump in going to the next model is that ERRO of different adults is
-no longer assumed to be the same, and the way that most people have dealt
-with that situation is by making ERRO dependent upon the age of the individual.
-
-## Age-structured models
-
-The main feature of all of these models is that the ERRO of an adult typically
-depends on its age.  Thus, in all cases, to do inference in these models---at least
-from HS---one is going to need to be able to calculate the ERRO for individuals
-of a given age, $a$.  That is always going to depend on the relative number of such age $a$
-individuals (typically at a given time), and also on the fecundity of those individuals.
-
-As Dave pointed out, another reason to go to an age structure model is that
-survival at age amongst adults might vary, even if fecundity is not.  So you could
-conceivably have a model (an intermediate model) where the ERRO for all adults is the
-same, but survival rates are different for different ages.
-
-### Time-homogenous $S_a$ and $\Fec_a$ and equilibrium
-
-This sort of scenario is probably almost never seen in species with high recuitment
-variability, but is starting point.  We have age-specific survival and fecundity rates,
-$S_a$ and $\Fec_a$, and under a scenario of constant population size $S_a$ alone
-will imply an equilibrium age distribution $R_a$.  If the population is growing or
-declining, then a stable age distribution could also be found given the
-rate of growth (perhaps rate of increase of newborns?).  (This is what we modeled
-for the initial red snapper simulations).
-
-### Time-homogenous $S_a$ and $\Fec_a$, but recruitment variability
-
-In this case, the age-compositions, $R_a$ are no longer stable or constant.
-So, we need to get these somehow---those could come from a recruitment index,
-for example, propagated forward through time via the $S_a$ values.  Or it could
-come from an estimate of age-composition (of the mature adults) each year. And that
-age-composition estimate would be needed for time 0 (the earliest birth year of a second-born
-potential half sibling).  
-
-Liam brings up a great point about fact ages 10 to 40 are lumped into the 10+ category
-in the stock assessment.  
-
-
-### Time dependent (possibly fishery-related) mortality
-
-Bugaboo here is that discard-mortality is a huge source of mortatlity in red snapper and
-is not well estimated at all.  Fishery mortality is typically estimated pretty well.  
